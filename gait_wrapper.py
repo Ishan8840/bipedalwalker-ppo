@@ -3,7 +3,7 @@ import gymnasium as gym
 import math
 
 class GaitWrapper(gym.Wrapper):
-    def __init__(self, env, T=60, d_lower=-0.3):
+    def __init__(self, env, T=20, d_lower=-0.3):
         """
         T = gait period (in environment steps)
         d_lower = stance/swing threshold (-1 to 1)

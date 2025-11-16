@@ -71,7 +71,7 @@ def compute_gae(values, rewards, gamma=0.99, lam=0.95):
     return advantages, returns
 
 
-def gait_reward(obs, phase_left, phase_right, d_lower=-0.3):
+def gait_reward(obs, phase_left, phase_right, d_lower=-0.4):
     left_contact  = obs[8]
     right_contact = obs[9]
 
