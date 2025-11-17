@@ -1,13 +1,21 @@
+import math
 import gymnasium as gym
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from torch.distributions import Normal
-from gait_wrapper import GaitWrapper
 
 
-env = env = GaitWrapper(gym.make("BipedalWalker-v3", hardcore=False, render_mode=None))
+curriculum = [
+    {"hardcore": False},  # Level 0: easy (flat terrain)
+    {"hardcore": True}    # Level 1: full hardcore environment
+]
+
+
+def make_env(level):
+    params = curriculum[level]
+    return gym.make("BipedalWalker-v3", **params, render_mode=None)
 
 
 class PolicyNetwork(nn.Module):
@@ -70,40 +78,8 @@ def compute_gae(values, rewards, gamma=0.99, lam=0.95):
 
     return advantages, returns
 
-
-def gait_reward(obs, phase_left, phase_right, d_lower=0.3):
-    left_contact  = obs[8]
-    right_contact = obs[9]
-
-    reward = 0.0
-
-    # stance when phase >= d_lower
-    if phase_left > d_lower and left_contact == 0:
-        reward -= 0.2
-
-    # swing when phase <= -d_lower
-    if phase_left < -d_lower and left_contact == 1:
-        reward -= 0.2
-
-    # same for right
-    if phase_right > d_lower and right_contact == 0:
-        reward -= 0.2
-
-    if phase_right < -d_lower and right_contact == 1:
-        reward -= 0.2
-
-    if left_contact != right_contact:
-        reward += 0.1
-    else:
-        reward -= 0.05
-
-
-    return reward
-
-
-
-state_dim = 26
-action_dim = env.action_space.shape[0]
+state_dim = gym.make("BipedalWalker-v3").observation_space.shape[0]
+action_dim = gym.make("BipedalWalker-v3").action_space.shape[0]
 
 actor = PolicyNetwork(state_dim, action_dim)
 critic = ValueNetwork(state_dim)
@@ -117,12 +93,14 @@ n_epochs = 10
 gamma = 0.99
 lam = 0.95
 eps_clip = 0.2
-n_episodes = 1000
+n_episodes = 1500
 
-state = env.reset()[0]
+level = 0
+env = make_env(level)
 
 
 for episode in range(n_episodes):
+    state = env.reset()[0]
     states, actions, rewards, log_probs, values = [], [], [], [], []
 
     for _ in range(n_steps):
@@ -132,13 +110,12 @@ for episode in range(n_episodes):
         dist = Normal(mu, std)
         raw_action = dist.rsample()
         action = torch.tanh(raw_action)
-        log_prob = dist.log_prob(raw_action) - torch.log(1 - action.pow(2) + 1e-6)
+        log_prob = dist.log_prob(raw_action) - torch.log(1 - action.pow(2) + 1e-7)
         log_prob = log_prob.sum(dim=-1)
 
         next_state, reward, terminated, truncated, info = env.step(action.detach().numpy()[0])
 
         value = critic(state_tensor).item()
-        reward += gait_reward(next_state, info["phase_left"], info["phase_right"])
 
         states.append(state)
         actions.append(raw_action.detach().numpy()[0])
@@ -173,7 +150,7 @@ for episode in range(n_episodes):
             mu, std = actor(s_batch)
             dist = Normal(mu, std)
             scaled_actions = torch.tanh(a_batch)
-            log_probs_new = dist.log_prob(a_batch) - torch.log(1 - scaled_actions.pow(2) + 1e-6)
+            log_probs_new = dist.log_prob(a_batch) - torch.log(1 - scaled_actions.pow(2) + 1e-7)
             log_probs_new = log_probs_new.sum(dim=-1)
             ratio = torch.exp(log_probs_new - old_lp_batch)
 
@@ -193,12 +170,20 @@ for episode in range(n_episodes):
             critic_loss.backward()
             critic_optimizer.step()
 
+    episode_reward = sum(rewards)
     if episode % 10 == 0:
-        print(f"Episode: {episode}, reward: {sum(rewards)}")
+        print(f"Episode: {episode}, reward: {episode_reward}, level: {level}")
+
+    if episode_reward > 300 and level < len(curriculum) - 1:  # threshold to level up
+        level += 1
+        env = make_env(level)
+        torch.save(actor.state_dict(), f"actor_level_{level}.pth")
+        torch.save(critic.state_dict(), f"critic_level_{level}.pth")
+        print(f"Curriculum level up! Now training on level {level}")
 
 
 
-env = GaitWrapper(gym.make("BipedalWalker-v3", hardcore=False, render_mode="human"))
+env = gym.make("BipedalWalker-v3", hardcore=True, render_mode="human")
 
 for episode in range(10):
     state = env.reset()[0]
