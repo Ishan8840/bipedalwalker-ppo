@@ -38,13 +38,13 @@ In this repository, your implementation of PPO follows these principles:
 ### Installation
 
 ```bash
-pip install gymnasium[box2d] torch numpy
+pip install requirements.txt
 ```
 
 ### Training
 
 ```bash
-python train.py
+python ppo.py
 ```
 
 * The script runs PPO with curriculum learning.
